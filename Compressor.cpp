@@ -5,7 +5,16 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+enum Model
+{
+    Statistics,
+    HistoricDictionary,
+    FutureDictionary,
+    Distance
+};
 
 enum Action
 {
@@ -13,10 +22,34 @@ enum Action
     Decompress
 };
 
+struct History
+{
+    std::unordered_map<std::size_t, std::size_t> historicData;
+    std::unordered_map<std::size_t, std::size_t> performance;
+};
+
+struct PredictionModel
+{
+    Model model = Model::Statistics;
+    History history;
+
+    PredictionModel() = default;
+    PredictionModel(Model model)
+    {
+        this->model = model;
+    }
+};
+
+struct GuessResult
+{
+    bool correct = true;
+    std::vector<unsigned char> guessedBits{1};
+};
+
 struct Command
 {
     Action action = Action::Compress;
-    std::string target = "enwik3";
+    std::string target = "enwik1";
 
     bool operator==(const Command& otherCommand)
     {
@@ -31,6 +64,33 @@ struct Command
     }
 };
 
+struct Operation
+{
+    Command command = Command(Action::Compress, "enwik1");
+    std::vector<unsigned char> inputBytes{'<', 'm', 'e', 'd', 'i', 'a', 'w', 'i', 'k', 'i'};
+};
+
+struct Predictor
+{
+    std::size_t inputPosition = 0;
+    Operation operation;
+};
+
+GuessResult MakeGuess(const std::vector<PredictionModel>& predictionModels)
+{
+    return GuessResult();
+}
+
+void RecordGuess()
+{
+    return;
+}
+
+void RecordHistory()
+{
+    return;
+}
+
 std::string GetUsage() {
     std::string usage = "Usage: ./Compressor <command> <target>\n\n";
     usage += "Commands:\n";
@@ -43,14 +103,6 @@ std::string GetUsage() {
     usage += "    ./Compressor -d enwik3.iw";
 
     return usage;
-}
-
-void ValidateArguments(const std::vector<std::string>& cliArguments) {
-    const std::size_t expectedArguments = 3;
-
-    if (cliArguments.size() != expectedArguments) {
-        throw std::runtime_error("Invalid number of command line arguments\n\n" + GetUsage());
-    }
 }
 
 Action GetAction(const std::vector<std::string>& cliArguments)
@@ -82,6 +134,11 @@ std::vector<unsigned char> ReadTarget(const std::string& target)
 {
     std::ifstream inputFile(target, std::ios::binary);
 
+    if (inputFile.fail())
+    {
+        throw std::runtime_error("Could not read from file " + target);
+    }
+
     std::vector<unsigned char> inputBytes(
         (std::istreambuf_iterator<char>(inputFile)),
         (std::istreambuf_iterator<char>()));
@@ -89,9 +146,40 @@ std::vector<unsigned char> ReadTarget(const std::string& target)
     return inputBytes;
 }
 
-void ProcessTarget()
+void ProcessTarget(const Operation& operation)
 {
+    const std::size_t numberBits = 8;
+
+    std::size_t correctBits = 0;
+    std::vector<PredictionModel> predictionModels;
+    std::vector<unsigned char> outputBytes;
+
+    predictionModels.push_back(PredictionModel(Model::Statistics));
+    predictionModels.push_back(PredictionModel(Model::HistoricDictionary));
+    predictionModels.push_back(PredictionModel(Model::FutureDictionary));
+    predictionModels.push_back(PredictionModel(Model::Distance));
+
+    while (correctBits != operation.inputBytes.size() * numberBits)
+    {
+        GuessResult guessResult = MakeGuess(predictionModels);
+        RecordGuess();
+        RecordHistory();
+
+        if (guessResult.correct)
+        {
+            correctBits += guessResult.guessedBits.size();
+        }
+    }
+
     return;
+}
+
+void ValidateArguments(const std::vector<std::string>& cliArguments) {
+    const std::size_t expectedArguments = 3;
+
+    if (cliArguments.size() != expectedArguments) {
+        throw std::runtime_error("Invalid number of command line arguments\n\n" + GetUsage());
+    }
 }
 
 Command GetCommand(const std::vector<std::string>& cliArguments)
@@ -116,8 +204,17 @@ Command GetCommand(const std::vector<std::string>& cliArguments)
 
 void ExecuteCommand(const Command& command)
 {
-    std::vector<unsigned char> inputBytes = ReadTarget(command.target);
-    ProcessTarget();
+    assert(ReadTarget("enwik") == (std::vector<unsigned char>{}));
+    assert(ReadTarget("enwik1") == (std::vector<unsigned char>{'<', 'm', 'e', 'd', 'i', 'a', 'w', 'i', 'k', 'i'}));
+    assert(ReadTarget("enwik2").size() == 100);
+    assert(ReadTarget("enwik3").size() == 1000);
+
+    Operation operation;
+
+    operation.command = command;
+    operation.inputBytes = ReadTarget(command.target);
+
+    ProcessTarget(operation);
 
     return;
 }
