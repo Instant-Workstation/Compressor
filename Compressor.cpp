@@ -22,10 +22,22 @@ enum Action
     Decompress
 };
 
+struct Guess
+{
+    unsigned char bit = 1;
+    double confidence = 0.5;
+};
+
+struct Performance
+{
+    std::size_t correct = 0;
+    std::size_t incorrect = 0;
+};
+
 struct History
 {
     std::unordered_map<std::size_t, std::size_t> historicData;
-    std::unordered_map<std::size_t, std::size_t> performance;
+    std::unordered_map<std::size_t, Performance> performance;
 };
 
 struct PredictionModel
@@ -76,9 +88,40 @@ struct Predictor
     Operation operation;
 };
 
+Guess GuessBit(const std::vector<PredictionModel>& predictionModels)
+{
+    return Guess();
+}
+
+std::vector<unsigned char> GuessBits(const std::vector<PredictionModel>& predictionModels)
+{
+    double confidence = 1.0;
+    std::vector<unsigned char> guessedBits;
+
+    while (confidence > 0.5)
+    {
+        Guess guess = GuessBit(predictionModels);
+
+        guessedBits.push_back(guess.bit);
+        confidence *= guess.confidence;
+    }
+
+    return std::vector<unsigned char>{1};
+}
+
+bool CheckGuess()
+{
+    return true;
+}
+
 GuessResult MakeGuess(const std::vector<PredictionModel>& predictionModels)
 {
-    return GuessResult();
+    GuessResult guessResult;
+
+    guessResult.guessedBits = GuessBits(predictionModels);
+    guessResult.correct = CheckGuess();
+
+    return guessResult;
 }
 
 void RecordGuess()
