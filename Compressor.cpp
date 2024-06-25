@@ -36,7 +36,7 @@ struct Performance
 
 struct History
 {
-    std::unordered_map<std::size_t, std::size_t> historicData;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::size_t>> historicData;
     std::unordered_map<std::size_t, Performance> performance;
 };
 
@@ -82,25 +82,64 @@ struct Operation
     std::vector<unsigned char> inputBytes{'<', 'm', 'e', 'd', 'i', 'a', 'w', 'i', 'k', 'i'};
 };
 
-struct Predictor
+struct OperationStatus
 {
-    std::size_t inputPosition = 0;
     Operation operation;
+    std::size_t inputPosition = 0;
 };
 
-Guess GuessBit(const std::vector<PredictionModel>& predictionModels)
+struct Predictor
 {
+    OperationStatus operationStatus;
+    std::vector<PredictionModel> predictionModels;
+};
+
+unsigned char ChooseBit(const Predictor& predictor)
+{
+    std::size_t voteZero = 0;
+    std::size_t voteOne = 0;
+
+    for (const PredictionModel& predictionModel : predictor.predictionModels)
+    {
+        switch (predictionModel.model)
+        {
+            case Model::Statistics:
+                break;
+            case Model::HistoricDictionary:
+                break;
+            case Model::FutureDictionary:
+                break;
+            case Model::Distance:
+                break;
+            default:
+                throw std::runtime_error("Unknown prediction model");
+        }
+    }
+
+    return 1;
+}
+
+void GetConfidence()
+{
+    return;
+}
+
+Guess GuessBit(const Predictor& predictor)
+{
+    ChooseBit(predictor);
+    GetConfidence();
+
     return Guess();
 }
 
-std::vector<unsigned char> GuessBits(const std::vector<PredictionModel>& predictionModels)
+std::vector<unsigned char> GuessBits(const Predictor& predictor)
 {
     double confidence = 1.0;
     std::vector<unsigned char> guessedBits;
 
     while (confidence > 0.5)
     {
-        Guess guess = GuessBit(predictionModels);
+        Guess guess = GuessBit(predictor);
 
         guessedBits.push_back(guess.bit);
         confidence *= guess.confidence;
@@ -114,11 +153,11 @@ bool CheckGuess()
     return true;
 }
 
-GuessResult MakeGuess(const std::vector<PredictionModel>& predictionModels)
+GuessResult MakeGuess(const Predictor& predictor)
 {
     GuessResult guessResult;
 
-    guessResult.guessedBits = GuessBits(predictionModels);
+    guessResult.guessedBits = GuessBits(predictor);
     guessResult.correct = CheckGuess();
 
     return guessResult;
@@ -192,19 +231,25 @@ std::vector<unsigned char> ReadTarget(const std::string& target)
 void ProcessTarget(const Operation& operation)
 {
     const std::size_t numberBits = 8;
-
     std::size_t correctBits = 0;
-    std::vector<PredictionModel> predictionModels;
     std::vector<unsigned char> outputBytes;
 
+    OperationStatus operationStatus;
+    operationStatus.operation = operation;
+
+    std::vector<PredictionModel> predictionModels;
     predictionModels.push_back(PredictionModel(Model::Statistics));
     predictionModels.push_back(PredictionModel(Model::HistoricDictionary));
     predictionModels.push_back(PredictionModel(Model::FutureDictionary));
     predictionModels.push_back(PredictionModel(Model::Distance));
 
+    Predictor predictor;
+    predictor.operationStatus = operationStatus;
+    predictor.predictionModels = predictionModels;
+
     while (correctBits != operation.inputBytes.size() * numberBits)
     {
-        GuessResult guessResult = MakeGuess(predictionModels);
+        GuessResult guessResult = MakeGuess(predictor);
         RecordGuess();
         RecordHistory();
 
