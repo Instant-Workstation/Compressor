@@ -22,6 +22,18 @@ enum Action
     Decompress
 };
 
+struct VoteWeight
+{
+    double confidence;
+    double performance;
+};
+
+struct Vote
+{
+    unsigned char bit = 1;
+    VoteWeight voteWeight;
+};
+
 struct Guess
 {
     unsigned char bit = 1;
@@ -31,7 +43,7 @@ struct Guess
 struct Performance
 {
     std::size_t correct = 0;
-    std::size_t incorrect = 0;
+    std::size_t incorrect = 1;
 };
 
 struct History
@@ -43,10 +55,11 @@ struct History
 struct PredictionModel
 {
     Model model = Model::Statistics;
+    std::size_t levels = 1;
     History history;
 
     PredictionModel() = default;
-    PredictionModel(Model model)
+    PredictionModel(Model model, std::size_t levels = 1)
     {
         this->model = model;
     }
@@ -91,19 +104,30 @@ struct OperationStatus
 struct Predictor
 {
     OperationStatus operationStatus;
-    std::vector<PredictionModel> predictionModels;
+    std::unordered_map<std::string, PredictionModel> predictionModels;
 };
 
-unsigned char ChooseBit(const Predictor& predictor)
+std::vector<Vote> StatisticsVotes(const Predictor& predictor)
 {
-    std::size_t voteZero = 0;
-    std::size_t voteOne = 0;
+    for (std::size_t level = 1; level <= predictor.predictionModels.at("Statistics").levels; level++)
+    {
 
-    for (const PredictionModel& predictionModel : predictor.predictionModels)
+    }
+
+    return std::vector<Vote>();
+}
+
+Guess GuessBit(const Predictor& predictor)
+{
+    std::vector<Vote> votes;
+    std::vector<Vote> statisticsVotes;
+
+    for (auto& [modelKey, predictionModel]: predictor.predictionModels)
     {
         switch (predictionModel.model)
         {
             case Model::Statistics:
+                statisticsVotes = StatisticsVotes(predictor);
                 break;
             case Model::HistoricDictionary:
                 break;
@@ -115,19 +139,6 @@ unsigned char ChooseBit(const Predictor& predictor)
                 throw std::runtime_error("Unknown prediction model");
         }
     }
-
-    return 1;
-}
-
-void GetConfidence()
-{
-    return;
-}
-
-Guess GuessBit(const Predictor& predictor)
-{
-    ChooseBit(predictor);
-    GetConfidence();
 
     return Guess();
 }
@@ -237,11 +248,11 @@ void ProcessTarget(const Operation& operation)
     OperationStatus operationStatus;
     operationStatus.operation = operation;
 
-    std::vector<PredictionModel> predictionModels;
-    predictionModels.push_back(PredictionModel(Model::Statistics));
-    predictionModels.push_back(PredictionModel(Model::HistoricDictionary));
-    predictionModels.push_back(PredictionModel(Model::FutureDictionary));
-    predictionModels.push_back(PredictionModel(Model::Distance));
+    std::unordered_map<std::string, PredictionModel> predictionModels;
+    predictionModels["Statistics"] = PredictionModel(Model::Statistics);
+    predictionModels["HistoricDictionary"] = PredictionModel(Model::HistoricDictionary);
+    predictionModels["FutureDictionary"] = PredictionModel(Model::FutureDictionary);
+    predictionModels["Distance"] = PredictionModel(Model::Distance);
 
     Predictor predictor;
     predictor.operationStatus = operationStatus;
