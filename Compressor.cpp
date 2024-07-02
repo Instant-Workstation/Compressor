@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -20,6 +21,12 @@ enum Action
 {
     Compress,
     Decompress
+};
+
+struct CombinationData
+{
+    std::size_t level = 1;
+    std::size_t value = 0;
 };
 
 struct VoteWeight
@@ -107,14 +114,41 @@ struct Predictor
     std::unordered_map<std::string, PredictionModel> predictionModels;
 };
 
-std::vector<Vote> StatisticsVotes(const Predictor& predictor)
+std::string GenerateKey(const CombinationData& combinationData)
 {
-    for (std::size_t level = 1; level <= predictor.predictionModels.at("Statistics").levels; level++)
-    {
+    std::string combinationKey = "";
 
+    for (std::size_t position = 1; position <= combinationData.level; position++)
+    {
+        if (combinationData.value & (1 << combinationData.level - position))
+        {
+            combinationKey += "1";
+        }
+        else
+        {
+            combinationKey += "0";
+        }
     }
 
-    return std::vector<Vote>();
+    return combinationKey;
+}
+
+std::vector<Vote> StatisticsVotes(const Predictor& predictor)
+{
+    std::vector<Vote> votes;
+    for (std::size_t level = 1; level <= predictor.predictionModels.at("Statistics").levels; level++)
+    {
+        for (std::size_t combination = 0; combination < 1 << level; combination++)
+        {
+            CombinationData combinationData;
+            combinationData.level = level;
+            combinationData.value = combination;
+
+            std::string combinationKey = GenerateKey(combinationData);
+        }
+    }
+
+    return votes;
 }
 
 Guess GuessBit(const Predictor& predictor)
