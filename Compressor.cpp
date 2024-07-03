@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
+using HistoryEntry = std::unordered_map<std::string, std::size_t>;
+
 enum Model
 {
     Statistics,
@@ -23,10 +25,32 @@ enum Action
     Decompress
 };
 
+struct RelativePosition
+{
+    std::size_t inputPosition = 0;
+    std::size_t level = 1;
+
+    RelativePosition() = default;
+
+    RelativePosition(std::size_t inputPosition, std::size_t level)
+    {
+        this->inputPosition = inputPosition;
+        this->level = level;
+    }
+};
+
 struct CombinationData
 {
     std::size_t level = 1;
     std::size_t value = 0;
+
+    CombinationData() = default;
+
+    CombinationData(std::size_t level, std::size_t value)
+    {
+        this->level = level;
+        this->value = value;
+    }
 };
 
 struct VoteWeight
@@ -55,7 +79,7 @@ struct Performance
 
 struct History
 {
-    std::unordered_map<std::string, std::unordered_map<std::string, std::size_t>> historicData;
+    std::unordered_map<std::string, HistoryEntry> historicData;
     std::unordered_map<std::size_t, Performance> performance;
 };
 
@@ -83,7 +107,7 @@ struct Command
     Action action = Action::Compress;
     std::string target = "enwik1";
 
-    bool operator==(const Command& otherCommand)
+    bool operator==(const Command& otherCommand) const
     {
         return action == otherCommand.action && target == otherCommand.target;
     }
@@ -133,11 +157,46 @@ std::string GenerateKey(const CombinationData& combinationData)
     return combinationKey;
 }
 
+std::size_t BitPosition(const RelativePosition& relativePosition)
+{
+    std::size_t bitPosition = relativePosition.level;
+    while ((relativePosition.inputPosition - (relativePosition.level - bitPosition)) % bitPosition != 0)
+    {
+        bitPosition--;
+    }
+
+    return relativePosition.level - bitPosition;
+}
+
 std::vector<Vote> StatisticsVotes(const Predictor& predictor)
 {
+    assert(GenerateKey(CombinationData(1, 0)) == "0");
+    assert(GenerateKey(CombinationData(1, 1)) == "1");
+    assert(GenerateKey(CombinationData(2, 0)) == "00");
+    assert(GenerateKey(CombinationData(2, 2)) == "10");
+    assert(GenerateKey(CombinationData(2, 3)) == "11");
+    assert(GenerateKey(CombinationData(4, 5)) == "0101");
+    assert(GenerateKey(CombinationData(8, 42)) == "00101010");
+    assert(GenerateKey(CombinationData(16, 127)) == "0000000001111111");
+
+    assert(BitPosition(RelativePosition(0, 1)) == 0);
+    assert(BitPosition(RelativePosition(1, 1)) == 0);
+    assert(BitPosition(RelativePosition(2, 1)) == 0);
+    assert(BitPosition(RelativePosition(2, 2)) == 0);
+    assert(BitPosition(RelativePosition(3, 1)) == 0);
+    assert(BitPosition(RelativePosition(3, 2)) == 1);
+    assert(BitPosition(RelativePosition(4, 4)) == 0);
+    assert(BitPosition(RelativePosition(30, 4)) == 2);
+
     std::vector<Vote> votes;
-    for (std::size_t level = 1; level <= predictor.predictionModels.at("Statistics").levels; level++)
+    const PredictionModel& statisticsModel = predictor.predictionModels.at("Statistics");
+    const std::unordered_map<std::string, HistoryEntry> historicData = statisticsModel.history.historicData;
+
+    for (std::size_t level = 1; level <= statisticsModel.levels; level *= 2)
     {
+        std::size_t votesZero = 1;
+        std::size_t votesOne = 1;
+
         for (std::size_t combination = 0; combination < 1 << level; combination++)
         {
             CombinationData combinationData;
@@ -145,7 +204,44 @@ std::vector<Vote> StatisticsVotes(const Predictor& predictor)
             combinationData.value = combination;
 
             std::string combinationKey = GenerateKey(combinationData);
+
+            if (statisticsModel.history.historicData.contains(combinationKey))
+            {
+                const HistoryEntry& combinationHistory = historicData.at(combinationKey);
+
+                RelativePosition relativePosition;
+                relativePosition.inputPosition = predictor.operationStatus.inputPosition;
+                relativePosition.level = level;
+
+                std::size_t bitPosition = BitPosition(relativePosition);
+
+                if (combinationKey.at(bitPosition) == '0')
+                {
+                    votesZero += combinationHistory.at("");
+                }
+                else
+                {
+                    votesOne += combinationHistory.at("");
+                }
+            }
         }
+
+        Performance performance;
+
+        if (statisticsModel.history.performance.contains(level))
+        {
+            performance = statisticsModel.history.performance.at(level);
+        }
+
+        VoteWeight voteWeight;
+        voteWeight.confidence = votesZero > votesOne ? votesZero / votesOne : votesOne / votesZero;
+        voteWeight.performance = performance.correct / performance.incorrect;
+
+        Vote vote;
+        vote.bit = votesZero > votesOne ? 0 : 1;
+        vote.voteWeight = voteWeight;
+
+        votes.push_back(vote);
     }
 
     return votes;
