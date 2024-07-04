@@ -53,16 +53,40 @@ struct CombinationData
     }
 };
 
+bool CheckDoubles(double first, double second)
+{
+    return std::fabs(first - second) < 0.01;
+}
+
 struct VoteWeight
 {
-    double confidence;
-    double performance;
+    double confidence = 0.0;
+    double performance = 0.0;
+
+    bool operator==(const VoteWeight& otherWeight) const
+    {
+        return CheckDoubles(confidence, otherWeight.confidence) && CheckDoubles(performance, otherWeight.performance);
+    }
 };
 
 struct Vote
 {
-    unsigned char bit = 1;
+    unsigned char bit = 0;
     VoteWeight voteWeight;
+
+    Vote() = default;
+
+    Vote(unsigned char bit, double confidence, double performance)
+    {
+        this->bit = bit;
+        this->voteWeight.confidence = confidence;
+        this->voteWeight.performance = performance;
+    }
+
+    bool operator==(const Vote& otherVote) const
+    {
+        return bit == otherVote.bit && voteWeight == otherVote.voteWeight;
+    }
 };
 
 struct Guess
@@ -194,8 +218,8 @@ std::vector<Vote> StatisticsVotes(const Predictor& predictor)
 
     for (std::size_t level = 1; level <= statisticsModel.levels; level *= 2)
     {
-        std::size_t votesZero = 1;
-        std::size_t votesOne = 1;
+        std::size_t votesZero = 0;
+        std::size_t votesOne = 0;
 
         for (std::size_t combination = 0; combination < 1 << level; combination++)
         {
@@ -233,12 +257,17 @@ std::vector<Vote> StatisticsVotes(const Predictor& predictor)
             performance = statisticsModel.history.performance.at(level);
         }
 
+        double votesZeroDouble = static_cast<double>(votesZero);
+        double votesOneDouble = static_cast<double>(votesOne);
+        double totalVotes = votesZeroDouble + votesOneDouble;
+        totalVotes = totalVotes == 0 ? 1 : totalVotes;
+
         VoteWeight voteWeight;
-        voteWeight.confidence = votesZero > votesOne ? votesZero / votesOne : votesOne / votesZero;
+        voteWeight.confidence = votesZero >= votesOne ? votesZeroDouble / totalVotes : votesOneDouble / totalVotes;
         voteWeight.performance = performance.correct / performance.incorrect;
 
         Vote vote;
-        vote.bit = votesZero > votesOne ? 0 : 1;
+        vote.bit = votesZero >= votesOne ? 0 : 1;
         vote.voteWeight = voteWeight;
 
         votes.push_back(vote);
@@ -249,6 +278,21 @@ std::vector<Vote> StatisticsVotes(const Predictor& predictor)
 
 Guess GuessBit(const Predictor& predictor)
 {
+    Predictor testPredictor;
+    testPredictor.predictionModels["Statistics"] = PredictionModel(Model::Statistics);
+    PredictionModel& statisticsModel = testPredictor.predictionModels["Statistics"];
+
+    std::unordered_map<std::string, HistoryEntry>& statisticsHistory = statisticsModel.history.historicData;
+    statisticsHistory = std::unordered_map<std::string, HistoryEntry>();
+
+    assert(StatisticsVotes(testPredictor) == (std::vector<Vote>{Vote()}));
+
+    statisticsHistory["0"] = HistoryEntry{{"", 1}};
+    assert(StatisticsVotes(testPredictor) == (std::vector<Vote>{Vote(0, 1.0, 0.0)}));
+
+    statisticsHistory["1"] = HistoryEntry{{"", 2}};
+    assert(StatisticsVotes(testPredictor) == (std::vector<Vote>{Vote(1, 0.67, 0.0)}));
+
     std::vector<Vote> votes;
     std::vector<Vote> statisticsVotes;
 
