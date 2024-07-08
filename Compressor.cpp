@@ -228,6 +228,9 @@ bool StillPossible(
     assert(GetBitFromInput({128, 64, 2, 0}, 23) == 0);
     assert(GetBitFromInput({128, 64, 2, 0}, 22) == 1);
 
+    const std::vector<unsigned char>& inputBytes = predictor.operationStatus.operation.inputBytes;
+    const std::size_t inputPosition = predictor.operationStatus.position.inputPosition;
+
     for (std::size_t i = bitPosition; i > 0; i--)
     {
         if (guessedBits.size() >= ((bitPosition - i) + 1))
@@ -240,7 +243,7 @@ bool StillPossible(
         }
         else
         {
-            if (GetBitFromInput(predictor.operationStatus.operation.inputBytes, predictor.operationStatus.position.inputPosition - (((bitPosition - guessedBits.size()) - i) + 1)) !=
+            if (GetBitFromInput(inputBytes, inputPosition - (((bitPosition - guessedBits.size()) - i) + 1)) !=
                 (combinationKey.at(bitPosition - ((bitPosition - i) + 1)) == '0' ? 0 : 1))
             {
                 return false;
@@ -249,6 +252,28 @@ bool StillPossible(
     }
 
     return true;
+}
+
+std::string GenerateHistoricKey(const Predictor& predictor, std::vector<unsigned char> guessedBits, std::size_t level)
+{
+    const std::vector<unsigned char>& inputBytes = predictor.operationStatus.operation.inputBytes;
+    const std::size_t inputPosition = predictor.operationStatus.position.inputPosition;
+
+    std::string key;
+
+    for (std::size_t i = level; i > 0; i--)
+    {
+        if (guessedBits.size() >= ((level - i) + 1))
+        {
+            key.insert(0, (guessedBits.at(guessedBits.size() - ((level - i) + 1)) == 0 ? "0" : "1"));
+        }
+        else
+        {
+            key.insert(0, (GetBitFromInput(inputBytes, inputPosition - (((level - guessedBits.size()) - i) + 1)) == 0 ? "0" : "1"));
+        }
+    }
+
+    return key;
 }
 
 std::vector<Vote> StatisticsVotes(const Predictor& predictor, const std::vector<unsigned char> guessedBits)
@@ -264,6 +289,7 @@ std::vector<Vote> StatisticsVotes(const Predictor& predictor, const std::vector<
 
     assert(BitPosition(RelativePosition(0, 1)) == 0);
     assert(BitPosition(RelativePosition(1, 1)) == 0);
+    assert(BitPosition(RelativePosition(1, 2)) == 1);
     assert(BitPosition(RelativePosition(2, 1)) == 0);
     assert(BitPosition(RelativePosition(2, 2)) == 0);
     assert(BitPosition(RelativePosition(3, 1)) == 0);
@@ -297,14 +323,25 @@ std::vector<Vote> StatisticsVotes(const Predictor& predictor, const std::vector<
     testPredictor.operationStatus.position.inputPosition = 25;
     assert(StillPossible(testPredictor, {0, 0, 0}, "00000", 5) == true);
 
-    exit(0);
-
     std::vector<Vote> votes;
     const PredictionModel& statisticsModel = predictor.predictionModels.at("Statistics");
     const std::unordered_map<std::string, HistoryEntry> historicData = statisticsModel.history.historicData;
+    std::size_t divisor = 1;
 
-    for (std::size_t level = 1; level <= statisticsModel.levels; level *= 2)
+    for (std::size_t level = 1; level <= statisticsModel.levels; level++)
     {
+        if (level % divisor != 0)
+        {
+            continue;
+        }
+        else
+        {
+            if (divisor < 8)
+            {
+                divisor *= 2;
+            }
+        }
+
         std::size_t votesZero = 0;
         std::size_t votesOne = 0;
 
@@ -371,6 +408,63 @@ std::vector<Vote> StatisticsVotes(const Predictor& predictor, const std::vector<
     return votes;
 }
 
+std::vector<Vote> HistoricVotes(const Predictor& predictor, const std::vector<unsigned char> guessedBits)
+{
+    Predictor testPredictor;
+    testPredictor.operationStatus.position.inputPosition = 1;
+    testPredictor.operationStatus.position.virtualPosition = 1;
+    testPredictor.operationStatus.operation.inputBytes = {0};
+    assert(GenerateHistoricKey(testPredictor, {}, 1) == "0");
+
+    testPredictor.operationStatus.operation.inputBytes = {128};
+    assert(GenerateHistoricKey(testPredictor, {}, 1) == "1");
+
+    testPredictor.operationStatus.operation.inputBytes = {64};
+    assert(GenerateHistoricKey(testPredictor, {}, 1) == "0");
+
+    testPredictor.operationStatus.operation.inputBytes = {64};
+    testPredictor.operationStatus.position.virtualPosition = 2;
+    assert(GenerateHistoricKey(testPredictor, {1}, 1) == "1");
+
+    assert(GenerateHistoricKey(testPredictor, {1}, 2) == "01");
+
+    const std::size_t inputPosition = predictor.operationStatus.position.inputPosition;
+    const std::size_t virtualPosition = predictor.operationStatus.position.virtualPosition;
+
+    const PredictionModel& historicModel = predictor.predictionModels.at("HistoricDictionary");
+    const std::unordered_map<std::string, HistoryEntry> historicData = historicModel.history.historicData;
+
+    std::vector<Vote> votes;
+    std::size_t divisor = 1;
+
+    for (std::size_t level = 1; level <= historicModel.levels; level++)
+    {
+        if (virtualPosition <= (guessedBits.size() + inputPosition))
+        {
+            break;
+        }
+
+        if (level % divisor != 0)
+        {
+            continue;
+        }
+        else
+        {
+            if (divisor < 8)
+            {
+                divisor *= 2;
+            }
+        }
+
+        std::size_t votesZero = 0;
+        std::size_t votesOne = 0;
+
+        std::string key = GenerateHistoricKey(predictor, guessedBits, level);
+    }
+
+    return votes;
+}
+
 Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBits)
 {
     Predictor testPredictor;
@@ -406,13 +500,26 @@ Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBi
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(1, 1.0, 0.0)}));
 
     testPredictor.operationStatus.position.virtualPosition = 1;
+    testGuessedBits = { 1 };
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 1.0, 0.0)}));
 
     testGuessedBits = { 0 };
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 0.0, 0.0)}));
 
+    testPredictor.operationStatus.position.inputPosition = 1;
+    testPredictor.operationStatus.operation.inputBytes = { 128 };
+    testGuessedBits = {};
+    assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 1.0, 0.0)}));
+
+    testPredictor.operationStatus.operation.inputBytes = { 127 };
+    assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 0.0, 0.0)}));
+
+    statisticsModel.levels = 3;
+    assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 0.0, 0.0)}));
+
     std::vector<Vote> votes;
     std::vector<Vote> statisticsVotes;
+    std::vector<Vote> historicVotes;
 
     for (auto& [modelKey, predictionModel]: predictor.predictionModels)
     {
@@ -422,6 +529,7 @@ Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBi
                 statisticsVotes = StatisticsVotes(predictor, guessedBits);
                 break;
             case Model::HistoricDictionary:
+                historicVotes = HistoricVotes(predictor, guessedBits);
                 break;
             case Model::FutureDictionary:
                 break;
