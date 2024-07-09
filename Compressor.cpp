@@ -428,6 +428,11 @@ std::vector<Vote> HistoricVotes(const Predictor& predictor, const std::vector<un
 
     assert(GenerateHistoricKey(testPredictor, {1}, 2) == "01");
 
+    testPredictor.operationStatus.operation.inputBytes = {128};
+    testPredictor.operationStatus.position.inputPosition = 2;
+    testPredictor.operationStatus.position.virtualPosition = 4;
+    assert(GenerateHistoricKey(testPredictor, {1, 0}, 4) == "1010");
+
     const std::size_t inputPosition = predictor.operationStatus.position.inputPosition;
     const std::size_t virtualPosition = predictor.operationStatus.position.virtualPosition;
 
@@ -439,7 +444,7 @@ std::vector<Vote> HistoricVotes(const Predictor& predictor, const std::vector<un
 
     for (std::size_t level = 1; level <= historicModel.levels; level++)
     {
-        if (virtualPosition <= (guessedBits.size() + inputPosition))
+        if (virtualPosition < level)
         {
             break;
         }
@@ -460,6 +465,59 @@ std::vector<Vote> HistoricVotes(const Predictor& predictor, const std::vector<un
         std::size_t votesOne = 0;
 
         std::string key = GenerateHistoricKey(predictor, guessedBits, level);
+
+        if (historicData.contains(key))
+        {
+            HistoryEntry historyEntry = historicData.at(key);
+
+            for (auto& [combination, occurences]: historyEntry)
+            {
+                RelativePosition relativePosition;
+                relativePosition.inputPosition = predictor.operationStatus.position.virtualPosition;
+                relativePosition.level = level;
+
+                std::size_t bitPosition = BitPosition(relativePosition);
+
+                if (StillPossible(predictor, guessedBits, combination, bitPosition))
+                {
+                    if (combination.at(bitPosition) == '0')
+                    {
+                        votesZero += occurences;
+                    }
+                    else
+                    {
+                        votesOne += occurences;
+                    }
+                }
+            }
+        }
+
+        Performance performance;
+
+        if (historicModel.history.performance.contains(level))
+        {
+            performance = historicModel.history.performance.at(level);
+        }
+
+        double votesZeroDouble = static_cast<double>(votesZero);
+        double votesOneDouble = static_cast<double>(votesOne);
+        double totalVotes = votesZeroDouble + votesOneDouble;
+
+        double correctDouble = static_cast<double>(performance.correct);
+        double incorrectDouble = static_cast<double>(performance.incorrect);
+        double totalGuesses = correctDouble + incorrectDouble;
+
+        totalVotes = totalVotes == 0 ? 1 : totalVotes;
+
+        VoteWeight voteWeight;
+        voteWeight.confidence = votesZero >= votesOne ? votesZeroDouble / totalVotes : votesOneDouble / totalVotes;
+        voteWeight.performance = correctDouble / (correctDouble + incorrectDouble);
+
+        Vote vote;
+        vote.bit = votesZero >= votesOne ? 0 : 1;
+        vote.voteWeight = voteWeight;
+
+        votes.push_back(vote);
     }
 
     return votes;
@@ -469,10 +527,14 @@ Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBi
 {
     Predictor testPredictor;
     testPredictor.predictionModels["Statistics"] = PredictionModel(Model::Statistics);
+    testPredictor.predictionModels["HistoricDictionary"] = PredictionModel(Model::HistoricDictionary);
     PredictionModel& statisticsModel = testPredictor.predictionModels["Statistics"];
+    PredictionModel& historicModel = testPredictor.predictionModels["HistoricDictionary"];
 
     std::unordered_map<std::string, HistoryEntry>& statisticsHistory = statisticsModel.history.historicData;
     std::unordered_map<std::size_t, Performance>& statisticsPerformance = statisticsModel.history.performance;
+    std::unordered_map<std::string, HistoryEntry>& historicHistory = historicModel.history.historicData;
+    std::unordered_map<std::size_t, Performance>& historicPerformance = historicModel.history.performance;
 
     statisticsHistory = std::unordered_map<std::string, HistoryEntry>();
     statisticsPerformance = std::unordered_map<std::size_t, Performance>();
@@ -480,6 +542,7 @@ Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBi
     std::vector<unsigned char> testGuessedBits;
 
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote()}));
+    assert(HistoricVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{}));
 
     statisticsHistory["0"] = HistoryEntry{{"", 1}};
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(0, 1.0, 0.0)}));
@@ -495,6 +558,7 @@ Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBi
 
     statisticsModel.levels = 2;
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 0.0, 0.0)}));
+    assert(HistoricVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{}));
 
     statisticsHistory["10"] = HistoryEntry{{"", 5}};
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(1, 1.0, 0.0)}));
@@ -502,6 +566,7 @@ Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBi
     testPredictor.operationStatus.position.virtualPosition = 1;
     testGuessedBits = { 1 };
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 1.0, 0.0)}));
+    assert(HistoricVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(0, 0.0, 0.0)}));
 
     testGuessedBits = { 0 };
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 0.0, 0.0)}));
@@ -509,13 +574,29 @@ Guess GuessBit(const Predictor& predictor, std::vector<unsigned char>& guessedBi
     testPredictor.operationStatus.position.inputPosition = 1;
     testPredictor.operationStatus.operation.inputBytes = { 128 };
     testGuessedBits = {};
+    historicHistory["0"] = HistoryEntry{{"1", 1}};
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 1.0, 0.0)}));
+    assert(HistoricVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(0, 0.0, 0.0)}));
+
+    historicHistory["1"] = HistoryEntry{{"1", 1}};
+    assert(HistoricVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 1.0, 0.0)}));
+
+    historicHistory["1"] = HistoryEntry{{"0", 1 }, {"1", 4}};
+    assert(HistoricVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.8, 0.0)}));
 
     testPredictor.operationStatus.operation.inputBytes = { 127 };
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 0.0, 0.0)}));
 
     statisticsModel.levels = 3;
     assert(StatisticsVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 0.67, 0.83), Vote(0, 0.0, 0.0)}));
+
+    testPredictor.operationStatus.position.inputPosition = 1;
+    testPredictor.operationStatus.position.virtualPosition = 2;
+    testPredictor.operationStatus.operation.inputBytes = { 128 };
+    testGuessedBits = { 0 };
+    historicModel.levels = 2;
+    historicHistory["10"] = HistoryEntry{{"0", 1 }, {"1", 4}};
+    assert(HistoricVotes(testPredictor, testGuessedBits) == (std::vector<Vote>{Vote(1, 1.0, 0.0), Vote(1, 0.8, 0.0)}));
 
     std::vector<Vote> votes;
     std::vector<Vote> statisticsVotes;
